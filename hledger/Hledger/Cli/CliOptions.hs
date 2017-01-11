@@ -23,6 +23,7 @@ module Hledger.Cli.CliOptions (
   defAddonCommandMode,
   argsFlag,
   showModeUsage,
+  showBashUsage,
   withAliases,
 
   -- * CLI options
@@ -104,6 +105,7 @@ helpflags = [
  ,flagNone ["help"] (setboolopt "help") "show the current program's manual as plain text (or after an add-on COMMAND, the add-on's manual)"
  ,flagNone ["man"]  (setboolopt "man")  "show the current program's manual with man"
  ,flagNone ["info"] (setboolopt "info") "show the current program's manual with info"
+ ,flagNone ["bash"] (setboolopt "bash") "generate bash autocompletion source"
  -- ,flagNone ["browse-args"] (setboolopt "browse-args") "use a web UI to select options and build up a command line"
  ,flagReq  ["debug"]    (\s opts -> Right $ setopt "debug" s opts) "[N]" "show debug output (levels 1-9, default: 1)"
  ,flagNone ["version"] (setboolopt "version") "show version information"
@@ -239,6 +241,12 @@ showModeUsage :: Mode a -> String
 showModeUsage = (showText defaultWrap :: [Text] -> String) .
                (helpText [] HelpFormatDefault :: Mode a -> [Text])
 
+-- | Get a mode's usage message as a nicely wrapped string.
+showBashUsage :: Mode a -> String
+showBashUsage = (showText nowrap :: [Text] -> String) .
+               (helpText [] HelpFormatBash :: Mode a -> [Text])
+    where nowrap = Wrap 1000000 :: TextFormat
+
 -- | Get the most appropriate documentation topic for a mode.
 -- Currently, that is either the hledger, hledger-ui, hledger-web or
 -- hledger-api manual.
@@ -372,6 +380,7 @@ getCliOpts mode' = do
   debugArgs args' opts
   -- if any (`elem` args) ["--help","-h","-?"]
   when ("h" `inRawOpts` rawopts_ opts) $ putStr (showModeUsage mode') >> exitSuccess
+  when ("bash" `inRawOpts` rawopts_ opts) $ putStr (showBashUsage mode') >> exitSuccess
   when ("help" `inRawOpts` rawopts_ opts) $ printHelpForTopic (topicForMode mode') >> exitSuccess
   return opts
   where

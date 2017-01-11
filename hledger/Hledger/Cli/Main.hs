@@ -252,17 +252,20 @@ main = do
     hasVersion           = ("--version" `elem`)
     hasDetailedVersion   = ("--version+" `elem`)
     printUsage           = putStr $ showModeUsage $ mainmode addonDisplayNames
+    printBash            = putStr $ showBashUsage $ mainmode addonDisplayNames
     badCommandError      = error' ("command "++rawcmd++" is not recognized, run with no command to see a list") >> exitFailure
     hasShortHelpFlag args = any (`elem` args) ["-h"]
     hasLongHelpFlag args = any (`elem` args) ["--help"]
     hasManFlag args      = any (`elem` args) ["--man"]
     hasInfoFlag args     = any (`elem` args) ["--info"]
-    hasSomeHelpFlag args = hasShortHelpFlag args || hasLongHelpFlag args || hasManFlag args || hasInfoFlag args
+    hasBashFlag args     = any (`elem` args) ["--bash"]
+    hasSomeHelpFlag args = hasShortHelpFlag args || hasLongHelpFlag args || hasManFlag args || hasInfoFlag args || hasBashFlag args
     f `orShowHelp` mode
       | hasShortHelpFlag args = putStr $ showModeUsage mode
       | hasLongHelpFlag args  = printHelpForTopic t
       | hasManFlag args       = runManForTopic t
       | hasInfoFlag args      = runInfoForTopic t
+      | hasBashFlag args      = putStr $ showBashUsage mode
       | otherwise             = f
       where t = topicForMode mode
   dbgIO "processed opts" opts
@@ -282,6 +285,7 @@ main = do
       | hasLongHelpFlag  argsbeforecmd = dbgIO "" "--help before command, showing general manual" >> printHelpForTopic (topicForMode $ mainmode addonDisplayNames)
       | hasManFlag       argsbeforecmd = dbgIO "" "--man before command, showing general manual with man" >> runManForTopic (topicForMode $ mainmode addonDisplayNames)
       | hasInfoFlag      argsbeforecmd = dbgIO "" "--info before command, showing general manual with info" >> runInfoForTopic (topicForMode $ mainmode addonDisplayNames)
+      | hasBashFlag      argsbeforecmd = dbgIO "" "--bash before command, showing bash completion" >> printBash
       | not (hasSomeHelpFlag argsaftercmd) && (hasVersion argsbeforecmd || (hasVersion argsaftercmd && isInternalCommand))
                                  = putStrLn prognameandversion
       | not (hasSomeHelpFlag argsaftercmd) && (hasDetailedVersion argsbeforecmd || (hasDetailedVersion argsaftercmd && isInternalCommand))

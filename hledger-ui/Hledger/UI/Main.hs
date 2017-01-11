@@ -52,6 +52,7 @@ main = do
         | "help"            `inRawOpts` (rawopts_ $ cliopts_ opts) = printHelpForTopic (topicForMode uimode) >> exitSuccess
         | "man"             `inRawOpts` (rawopts_ $ cliopts_ opts) = runManForTopic (topicForMode uimode) >> exitSuccess
         | "info"            `inRawOpts` (rawopts_ $ cliopts_ opts) = runInfoForTopic (topicForMode uimode) >> exitSuccess
+        | "bash"            `inRawOpts` (rawopts_ $ cliopts_ opts) = putStr (showBashUsage uimode) >> exitSuccess
         | "version"         `inRawOpts` (rawopts_ $ cliopts_ opts) = putStrLn prognameandversion >> exitSuccess
         | "binary-filename" `inRawOpts` (rawopts_ $ cliopts_ opts) = putStrLn (binaryfilename progname)
         | otherwise                                                = withJournalDoUICommand opts runBrickUi
