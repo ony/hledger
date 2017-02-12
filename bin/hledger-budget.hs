@@ -4,8 +4,9 @@
   --package hledger
   --package cmdargs
   --package text
+  --package optparse-applicative
 -}
-{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE OverloadedStrings, LambdaCase, TupleSections #-}
 {-
 
 hledger-budget REPORT-COMMAND [--no-offset] [--no-buckets] [OPTIONS...]
@@ -142,10 +143,67 @@ $ hledger budget -- bal --period 'monthly to last month' --no-offset --average
 import Control.Arrow (first)
 import Data.Maybe
 import Data.List
-import System.Console.CmdArgs
+import Data.Monoid ((<>))
+import System.Console.CmdArgs hiding (help)
 import Hledger.Cli
-import Hledger.Cli.Main (mainmode)
+import Options.Applicative hiding (action)
+import Options.Applicative.Builder.Internal (HasName)
 import Hledger.Data.AutoTransaction
+
+-- | Build a 'ParserInfo' based on cmdargs mode
+--
+-- Note that sub modes are not handled
+modeAsParser :: Mode a -> (Parser (Either String a), InfoMod (Either String a))
+modeAsParser mode0 | not . null . fromGroup $ modeGroupModes mode0 = error "No support for sub modes"
+modeAsParser mode0 = (parser, infoMod) where
+    seedValue = modeValue mode0
+    infoMod = progDesc (modeHelp mode0)
+    parser = foldr (=<<) (Right seedValue) . concat <$> sequenceA (flagParsers ++ argParsers ++ [tailArgParser])
+    flagParsers = map ((maybeToList <$>) . optional . flagAsParser) . fromGroup $ modeGroupFlags mode0
+    argParsers = map (fmap (:[]) . argAsParser) . fst $ modeArgs mode0
+    tailArgParser = case snd $ modeArgs mode0 of
+        Nothing -> pure []
+        Just arg0
+            | argRequire arg0 -> some (argAsParser arg0)
+            | otherwise -> many (argAsParser $ arg0 { argRequire = True })
+
+-- | Represent flag from cmdargs package in a form of optparse-applicative
+flagAsParser :: Flag a -> Parser (a -> Either String a)
+flagAsParser flag0 = updParser where
+    upd = flagValue flag0
+    updParser = case flagInfo flag0 of
+        FlagNone -> parserNone (error "Shouldn't reference argument")
+        FlagReq -> parserReq
+        FlagOpt arg -> parserNone arg
+        FlagOptRare arg -> parserNone arg
+    parserNone arg = flag Right (upd arg) (helpInfo <> nameInfo)
+    parserReq = upd <$> strOption (helpInfo <> nameInfo <> typeInfo)
+    helpInfo = flagHelpAsInfoMod $ flagHelp flag0
+    flagHelpAsInfoMod = \case
+        "" -> idm
+        x -> help x
+    nameInfo :: HasName f => Mod f a
+    nameInfo = mconcat . map flagNameAsInfoMod $ flagNames flag0
+    flagNameAsInfoMod :: HasName f => String -> Mod f a
+    flagNameAsInfoMod = \case
+        [c] -> short c
+        cs -> long cs
+    typeInfo = flagTypeAsInfoMod $ flagType flag0
+    flagTypeAsInfoMod = \case
+        "" -> idm
+        x -> metavar x
+
+-- | Represent positional argument from cmdargs package in a form of optparse-applicative
+argAsParser :: Arg a -> Parser (a -> Either String a)
+argAsParser arg0 = updParser' where
+    updParser = upd <$> strArgument modType
+    updParser'
+        | argRequire arg0 = updParser
+        | otherwise = fromMaybe Right <$> optional updParser
+    upd = argValue arg0
+    modType = case argType arg0 of
+        [] -> idm
+        n -> metavar n
 
 budgetFlags :: [Flag RawOpts]
 budgetFlags =
@@ -165,6 +223,17 @@ actions = first injectBudgetFlags <$>
     , (printmode, flip withJournalDo' print')
     ]
 
+commands :: Parser (Either String RawOpts, CliOpts -> IO ())
+commands = subparser . mconcat . concat $ map f actions where
+    f (mode0, io) = cmd cmdName : map alias cmdAliases where
+        (parser, infoMod) = modeAsParser mode0
+        mainInfo = info (parser <**> helper) infoMod
+        -- https://github.com/pcapriotti/optparse-applicative/issues/113#issuecomment-69594575
+        aliasInfo = info (parser <**> helper) (progDesc $ "alias for " ++ cmdName)
+        (cmdName:cmdAliases) = modeNames mode0
+        cmd n = command n $ (,io) <$> mainInfo
+        alias n = command n $ (,io) <$> aliasInfo
+
 injectBudgetFlags :: Mode RawOpts -> Mode RawOpts
 injectBudgetFlags = injectFlags "\nBudgeting" budgetFlags
 
@@ -179,16 +248,6 @@ injectFlags section flags mode0 = mode' where
         case ((section ==) . fst) `partition` namedFlags0 of
             ([g], gs) -> (fst g, snd g ++ flags) : gs
             _ -> (section, flags) : namedFlags0
-
-cmdmode :: Mode RawOpts
-cmdmode = (mainmode [])
-    { modeNames = ["hledger-budget"]
-    , modeGroupModes = Group
-        { groupUnnamed = map fst actions
-        , groupNamed = []
-        , groupHidden = []
-        }
-    }
 
 journalBalanceTransactions' :: CliOpts -> Journal -> IO Journal
 journalBalanceTransactions' opts j = do
@@ -236,9 +295,13 @@ mapPostings f t = txnTieKnot $ t { tpostings = f $ tpostings t }
 
 main :: IO ()
 main = do
-    rawopts <- fmap decodeRawOpts . processArgs $ cmdmode
-    opts <- rawOptsToCliOpts rawopts
-    case find (\e -> command_ opts `elem` modeNames (fst e)) actions of
-        Just (amode, _) | "help" `elem` map fst (rawopts_ opts) -> print amode
-        Just (_, action) -> action opts
-        Nothing -> print cmdmode
+    let mainParseInfo = info (commands <**> helper) infoMod
+        infoMod = progDesc "run some basic reports in budget mode"
+        p = prefs disambiguate
+    erawopts <- customExecParser p mainParseInfo
+    case erawopts of
+        (Left msg, _) -> putStrLn $ "Error: " ++ msg
+        (Right rawopts, io) -> do
+            let rawopts' = decodeRawOpts rawopts
+            opts <- rawOptsToCliOpts rawopts'
+            io opts
