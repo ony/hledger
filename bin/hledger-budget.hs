@@ -140,7 +140,6 @@ $ hledger budget -- bal --period 'monthly to last month' --no-offset --average
   will be a child to the one you want to offset.
 
 -}
-import Control.Arrow (first)
 import Data.Maybe
 import Data.List
 import Data.Monoid ((<>))
@@ -205,16 +204,10 @@ argAsParser arg0 = updParser' where
         [] -> idm
         n -> metavar n
 
-budgetFlags :: [Flag RawOpts]
-budgetFlags =
-    [ flagNone ["no-buckets"] (setboolopt "no-buckets") "show all accounts besides mentioned in periodic transactions"
-    , flagNone ["no-offset"] (setboolopt "no-offset") "do not add up periodic transactions"
-    ]
-
-actions :: [(Mode RawOpts, CliOpts -> IO ())]
-actions = first injectBudgetFlags <$>
-    [ (manmode, man)
-    , (infomode, info')
+actions :: [(Mode RawOpts, (BudgetOpts, CliOpts) -> IO ())]
+actions =
+    [ (manmode, man . snd)
+    , (infomode, info' . snd)
     , (balancemode, flip withJournalDo' balance)
     , (balancesheetmode, flip withJournalDo' balancesheet)
     , (cashflowmode, flip withJournalDo' cashflow)
@@ -223,7 +216,7 @@ actions = first injectBudgetFlags <$>
     , (printmode, flip withJournalDo' print')
     ]
 
-commands :: Parser (Either String RawOpts, CliOpts -> IO ())
+commands :: Parser (Either String RawOpts, (BudgetOpts, CliOpts) -> IO ())
 commands = subparser . mconcat . concat $ map f actions where
     f (mode0, io) = cmd cmdName : map alias cmdAliases where
         (parser, infoMod) = modeAsParser mode0
@@ -234,28 +227,31 @@ commands = subparser . mconcat . concat $ map f actions where
         cmd n = command n $ (,io) <$> mainInfo
         alias n = command n $ (,io) <$> aliasInfo
 
-injectBudgetFlags :: Mode RawOpts -> Mode RawOpts
-injectBudgetFlags = injectFlags "\nBudgeting" budgetFlags
 
--- maybe lenses will help...
-injectFlags :: String -> [Flag RawOpts] -> Mode RawOpts -> Mode RawOpts
-injectFlags section flags mode0 = mode' where
-    mode' = mode0 { modeGroupFlags = groupFlags' }
-    groupFlags0 = modeGroupFlags mode0
-    groupFlags' = groupFlags0 { groupNamed = namedFlags' }
-    namedFlags0 = groupNamed groupFlags0
-    namedFlags' =
-        case ((section ==) . fst) `partition` namedFlags0 of
-            ([g], gs) -> (fst g, snd g ++ flags) : gs
-            _ -> (section, flags) : namedFlags0
+data BudgetOpts
+        = BudgetOpts
+          { budgetOptBuckets :: Bool
+          , budgetOptOffset :: Bool
+          }
+    deriving (Show)
+
+budgetOpts :: Parser BudgetOpts
+budgetOpts = BudgetOpts
+    <$> nswitch (long "no-buckets"
+                <> help "show all accounts besides mentioned in periodic transactions")
+    <*> nswitch (long "no-offset"
+                <> help "do not add up periodic transactions")
+
+nswitch :: Mod FlagFields Bool -> Parser Bool
+nswitch = flag True False
 
 journalBalanceTransactions' :: CliOpts -> Journal -> IO Journal
 journalBalanceTransactions' opts j = do
     let assrt = not $ ignore_assertions_ opts
     either error' return $ journalBalanceTransactions assrt j
 
-withJournalDo' :: CliOpts -> (CliOpts -> Journal -> IO ()) -> IO ()
-withJournalDo' opts = withJournalDo opts . wrapper where
+withJournalDo' :: (BudgetOpts, CliOpts) -> (CliOpts -> Journal -> IO ()) -> IO ()
+withJournalDo' (bopts, opts) = withJournalDo opts . wrapper where
     wrapper f opts' j = do
         -- use original transactions as input for journalBalanceTransactions to re-infer balances/prices
         let modifier = originalTransaction . foldr (flip (.) . runModifierTransaction') id mtxns
@@ -263,7 +259,7 @@ withJournalDo' opts = withJournalDo opts . wrapper where
             mtxns = jmodifiertxns j
             dates = jdatespan j
             ts' = map modifier $ jtxns j
-            ts'' | boolopt "no-offset" $ rawopts_ opts' = ts'
+            ts'' | not $ budgetOptOffset bopts = ts'
                  | otherwise= [makeBudget t | pt <- jperiodictxns j, t <- runPeriodicTransaction pt dates] ++ ts'
             makeBudget t = txnTieKnot $ t
                 { tdescription = "Budget transaction"
@@ -280,7 +276,7 @@ withJournalDo' opts = withJournalDo opts . wrapper where
                 | otherwise = remapAccount (parentAccountName an)
             remapPosting p = p { paccount = remapAccount $ paccount p, porigin = Just . fromMaybe p $ porigin p }
             remapTxn = mapPostings (map remapPosting)
-        let j'' | boolopt "no-buckets" $ rawopts_ opts' = j'
+        let j'' | not $ budgetOptBuckets bopts = j'
                 | null buckets = j'
                 | otherwise = j' { jtxns = remapTxn <$> jtxns j' }
 
@@ -295,13 +291,13 @@ mapPostings f t = txnTieKnot $ t { tpostings = f $ tpostings t }
 
 main :: IO ()
 main = do
-    let mainParseInfo = info (commands <**> helper) infoMod
+    let mainParseInfo = info ((,) <$> budgetOpts <*> commands <**> helper) infoMod
         infoMod = progDesc "run some basic reports in budget mode"
         p = prefs disambiguate
-    erawopts <- customExecParser p mainParseInfo
+    (bopts, erawopts) <- customExecParser p mainParseInfo
     case erawopts of
         (Left msg, _) -> putStrLn $ "Error: " ++ msg
         (Right rawopts, io) -> do
             let rawopts' = decodeRawOpts rawopts
             opts <- rawOptsToCliOpts rawopts'
-            io opts
+            io (bopts, opts)

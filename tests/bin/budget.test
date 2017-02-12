@@ -165,7 +165,7 @@ Ending balances (historical) in 2016/12/26-2017/01/04:
 >>>=0
 
 # We still can disable bucketing keeping rewrites and budget offset
-../../bin/hledger-budget bal -f - --no-total --no-buckets -DH expenses
+../../bin/hledger-budget bal -f - --no-total -DH expenses --no-buckets
 <<<
 ~ daily from 2016/12/31
     expenses:food  $8
@@ -200,7 +200,7 @@ Ending balances (historical) in 2016/12/31-2017/01/01:
 
 # We can disable offset keeping rewrites and bucketing
 # Note that original account names used for query
-../../bin/hledger-budget bal -f - --no-total --no-offset -DH expenses
+../../bin/hledger-budget bal -f - --no-total -DH expenses --no-offset
 <<<
 ~ daily from 2016/12/31
     expenses:food  $8
@@ -231,7 +231,7 @@ Ending balances (historical) in 2016/12/31-2017/01/01:
 >>>=0
 
 # We can keep just rewrites
-../../bin/hledger-budget bal -f - --no-total --no-buckets --no-offset -DH expenses
+../../bin/hledger-budget bal -f - --no-total -DH expenses --no-offset --no-buckets
 <<<
 ~ daily from 2016/12/31
     expenses:food  $8
