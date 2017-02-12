@@ -140,6 +140,7 @@ $ hledger budget -- bal --period 'monthly to last month' --no-offset --average
   will be a child to the one you want to offset.
 
 -}
+import Data.Bool
 import Data.Maybe
 import Data.List
 import Data.Monoid ((<>))
@@ -250,35 +251,54 @@ journalBalanceTransactions' opts j = do
     let assrt = not $ ignore_assertions_ opts
     either error' return $ journalBalanceTransactions assrt j
 
+-- | re-write postings according to rules
+--
+-- Note that results require re-inference of implicit amoutns via 'journalBalanceTransactions'
+journalApplyModifiers :: Journal -> Journal
+journalApplyModifiers j = mapTxn modifier j where
+    -- afte rmodify need to call journalBalanceTransactions to re-infer balances/prices
+    modifier = originalTransaction . foldr (flip (.) . runModifierTransaction') id mtxns
+    runModifierTransaction' = fmap txnTieKnot . runModifierTransaction Any
+    mtxns = jmodifiertxns j
+
+-- | generate periodic transactions
+journalApplyPeriodics :: Journal -> Journal
+journalApplyPeriodics j = j { jtxns = txns' } where
+    txns' = [makeBudget t | pt <- jperiodictxns j, t <- runPeriodicTransaction pt dates] ++ jtxns j
+    dates = jdatespan j
+    makeBudget t = txnTieKnot $ t
+        { tdescription = "Budget transaction"
+        , tpostings = map makeBudgetPosting $ tpostings t
+        }
+    makeBudgetPosting p = p { pamount = negate $ pamount p }
+
+-- | re-map account names into buckets from periodic transaction
+--
+-- Does nothing if no periodic transactions present in journal
+journalApplyBuckets :: Journal -> Journal
+journalApplyBuckets j = j' where
+    buckets = budgetBuckets j
+    remapAccount "" = "<unbucketed>"
+    remapAccount an
+        | an `elem` buckets = an
+        | otherwise = remapAccount (parentAccountName an)
+    remapPosting p = p { paccount = remapAccount $ paccount p
+                        , porigin = Just $ originalPosting p }
+    remapTxn = mapPostings (map remapPosting)
+    j' | null buckets = j
+       | otherwise = mapTxn remapTxn j
+
+mapTxn :: (Transaction -> Transaction) -> Journal -> Journal
+mapTxn f j = j { jtxns = map f $ jtxns j }
+
 withJournalDo' :: (BudgetOpts, CliOpts) -> (CliOpts -> Journal -> IO ()) -> IO ()
 withJournalDo' (bopts, opts) = withJournalDo opts . wrapper where
     wrapper f opts' j = do
-        -- use original transactions as input for journalBalanceTransactions to re-infer balances/prices
-        let modifier = originalTransaction . foldr (flip (.) . runModifierTransaction') id mtxns
-            runModifierTransaction' = fmap txnTieKnot . runModifierTransaction Any
-            mtxns = jmodifiertxns j
-            dates = jdatespan j
-            ts' = map modifier $ jtxns j
-            ts'' | not $ budgetOptOffset bopts = ts'
-                 | otherwise= [makeBudget t | pt <- jperiodictxns j, t <- runPeriodicTransaction pt dates] ++ ts'
-            makeBudget t = txnTieKnot $ t
-                { tdescription = "Budget transaction"
-                , tpostings = map makeBudgetPosting $ tpostings t
-                }
-            makeBudgetPosting p = p { pamount = negate $ pamount p }
-        j' <- journalBalanceTransactions' opts' j{ jtxns = ts'' }
-
-        -- re-map account names into buckets from periodic transaction
-        let buckets = budgetBuckets j
-            remapAccount "" = "<unbucketed>"
-            remapAccount an
-                | an `elem` buckets = an
-                | otherwise = remapAccount (parentAccountName an)
-            remapPosting p = p { paccount = remapAccount $ paccount p, porigin = Just . fromMaybe p $ porigin p }
-            remapTxn = mapPostings (map remapPosting)
-        let j'' | not $ budgetOptBuckets bopts = j'
-                | null buckets = j'
-                | otherwise = j' { jtxns = remapTxn <$> jtxns j' }
+        let modsA = bool id journalApplyPeriodics (budgetOptOffset bopts)
+                  . journalApplyModifiers
+            modsB = bool id journalApplyBuckets (budgetOptBuckets bopts)
+        j' <- journalBalanceTransactions' opts' . mapTxn originalTransaction $ modsA j
+        let j'' = modsB j'
 
         -- finally feed to real command
         f opts' j''
