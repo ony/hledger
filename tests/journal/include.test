@@ -17,7 +17,7 @@
 >>>=0
 
 # 2. including other formats
-hledger -f - print
+hledger -f - print --explicit
 <<<
 2016/1/1
    (x)  1

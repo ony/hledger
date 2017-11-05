@@ -431,7 +431,7 @@ inferBalancingAmount update t@Transaction{tpostings=ps}
     inferamount p@Posting{ptype=BalancedVirtualPosting}
      | not (hasAmount p) = updateAmount p bvsum
     inferamount p = return p
-    updateAmount p amt = update (paccount p) amt' >> return p { pamount=amt', porigin=Just $ originalPosting p }
+    updateAmount p amt = update (paccount p) amt' >> return (modifyPosting p) { pamount=amt' }
       where amt' = normaliseMixedAmount $ costOfMixedAmount (-amt)
 
 -- | Infer prices for this transaction's posting amounts, if needed to make
@@ -496,7 +496,7 @@ priceInferrerFor t pt = inferprice
 
     inferprice p@Posting{pamount=Mixed [a]}
       | caninferprices && ptype p == pt && acommodity a == fromcommodity
-        = p{pamount=Mixed [a{aprice=conversionprice}], porigin=Just $ originalPosting p}
+        = (modifyPosting p) { pamount=Mixed [a{aprice=conversionprice}] }
       where
         fromcommodity = head $ filter (`elem` sumcommodities) pcommodities -- these heads are ugly but should be safe
         conversionprice

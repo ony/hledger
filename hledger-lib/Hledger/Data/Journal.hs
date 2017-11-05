@@ -665,7 +665,7 @@ checkInferAndRegisterAmounts (Right oldTx) = do
   where
     inferFromAssignment :: Posting -> CurrentBalancesModifier s Posting
     inferFromAssignment p = maybe (return p)
-      (fmap (\a -> p { pamount = a, porigin = Just $ originalPosting p }) . setBalance (paccount p) . fst)
+      (fmap (\a -> (modifyPosting p) { pamount = a }) . setBalance (paccount p) . fst)
       $ pbalanceassertion p
 
 -- | Adds a posting's amonut to the posting's account balance and
@@ -721,7 +721,7 @@ journalApplyCommodityStyles j@Journal{jtxns=ts, jmarketprices=mps} = j''
       j' = journalInferCommodityStyles j
       j'' = j'{jtxns=map fixtransaction ts, jmarketprices=map fixmarketprice mps}
       fixtransaction t@Transaction{tpostings=ps} = t{tpostings=map fixposting ps}
-      fixposting p@Posting{pamount=a} = p{pamount=fixmixedamount a}
+      fixposting p@Posting{pamount=a} = (modifyPosting p) { pamount=fixmixedamount a }
       fixmarketprice mp@MarketPrice{mpamount=a} = mp{mpamount=fixamount a}
       fixmixedamount (Mixed as) = Mixed $ map fixamount as
       fixamount a@Amount{acommodity=c} = a{astyle=journalCommodityStyle j' c}
@@ -900,7 +900,7 @@ transactionPivot fieldortagname t = t{tpostings = map (postingPivot fieldortagna
 -- | Replace this posting's account name with the value
 -- of the given field or tag, if any, otherwise the empty string.
 postingPivot :: Text -> Posting -> Posting         
-postingPivot fieldortagname p = p{paccount = pivotedacct, porigin = Just $ originalPosting p}
+postingPivot fieldortagname p = (modifyPosting p) { paccount = pivotedacct }
   where
     pivotedacct
       | Just t <- ptransaction p, fieldortagname == "code"        = tcode t  

@@ -358,7 +358,7 @@ budgetRollUp CliOpts{rawopts_=rawopts} budget j = j { jtxns = remapTxn <$> jtxns
                   "" | boolopt "show-unbudgeted" rawopts -> origAcctName
                      | otherwise              -> T.append (T.pack "<unbudgeted>:") acctName
                   parent -> remapAccount' parent
-        remapPosting p = p { paccount = remapAccount $ paccount p, porigin = Just . fromMaybe p $ porigin p }
+        remapPosting p = (modifyPosting p) { paccount = remapAccount $ paccount p }
         remapTxn = mapPostings (map remapPosting)
         mapPostings f t = txnTieKnot $ t { tpostings = f $ tpostings t }
 

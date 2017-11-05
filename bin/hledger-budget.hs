@@ -212,7 +212,7 @@ budgetWrapper f opts' j = do
             remapAccount an
                 | an `elem` buckets = an
                 | otherwise = remapAccount (parentAccountName an)
-            remapPosting p = p { paccount = remapAccount $ paccount p, porigin = Just . fromMaybe p $ porigin p }
+            remapPosting p = (modifyPosting p) { paccount = remapAccount $ paccount p }
             remapTxn = mapPostings (map remapPosting)
         let j'' | boolopt "no-buckets" $ rawopts_ opts' = j'
                 | null buckets = j'

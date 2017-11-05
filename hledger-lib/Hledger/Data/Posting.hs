@@ -16,6 +16,7 @@ module Hledger.Data.Posting (
   post,
   -- * operations
   originalPosting,
+  modifyPosting,
   postingStatus,
   isReal,
   isVirtual,
@@ -98,6 +99,10 @@ post acct amt = posting {paccount=acct, pamount=Mixed [amt]}
 -- Get the original posting, if any.
 originalPosting :: Posting -> Posting
 originalPosting p = fromMaybe p $ porigin p
+
+-- Ensure modifiable copy of posting
+modifyPosting p@Posting{ porigin = Nothing } = p { porigin = Just p }
+modifyPosting p = p
 
 -- XXX once rendered user output, but just for debugging now; clean up
 showPosting :: Posting -> String
