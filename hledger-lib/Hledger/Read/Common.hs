@@ -466,11 +466,22 @@ nosymbolamountp = do
   p <- priceamountp
   -- apply the most recently seen default commodity and style to this commodityless amount
   defcs <- getDefaultCommodityAndStyle
+  let s0 = amountstyle{asprecision=prec, asdecimalpoint=mdec, asdigitgroups=mgrps}
   let (c,s) = case defcs of
-        Just (defc,defs) -> (defc, defs{asprecision=max (asprecision defs) prec})
-        Nothing          -> ("", amountstyle{asprecision=prec, asdecimalpoint=mdec, asdigitgroups=mgrps})
+        Just (defc,defs) -> (defc, defs `overrideStyle` s0)
+        Nothing          -> ("", s0)
   return $ Amount c q p s m
   <?> "no-symbol amount"
+
+-- | Gently override first style with a second one
+overrideStyle :: AmountStyle -> AmountStyle -> AmountStyle
+overrideStyle base override = base
+    { asprecision = foldr1 max $ asprecision <$> [override, base] -- only extend precision
+    , asdecimalpoint = lookupJust $ asdecimalpoint <$> [override, base]
+    , asdigitgroups = lookupJust $ asdigitgroups <$> [override, base]
+    }
+  where
+    lookupJust = listToMaybe . catMaybes
 
 commoditysymbolp :: TextParser m CommoditySymbol
 commoditysymbolp = (quotedcommoditysymbolp <|> simplecommoditysymbolp) <?> "commodity symbol"
