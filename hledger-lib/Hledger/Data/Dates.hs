@@ -89,7 +89,6 @@ import Data.Time.Clock
 import Data.Time.LocalTime
 import Safe (headMay, lastMay, readMay)
 import Text.Megaparsec.Compat
-import Text.Megaparsec.Perm
 import Text.Printf
 
 import Hledger.Data.Types
@@ -687,8 +686,7 @@ ymd = do
   y <- some digitChar
   failIfInvalidYear y
   sep <- datesepchar
-  m <- some digitChar
-  failIfInvalidMonth m
+  m <- show <$> (monthNum <|> numericMonth)
   char sep
   d <- some digitChar
   failIfInvalidDay d
@@ -699,8 +697,7 @@ ym = do
   y <- some digitChar
   failIfInvalidYear y
   datesepchar
-  m <- some digitChar
-  failIfInvalidMonth m
+  m <- show <$> (monthNum <|> numericMonth)
   return (y,m,"")
 
 y :: SimpleTextParser SmartDate
@@ -715,14 +712,46 @@ d = do
   failIfInvalidDay d
   return ("","",d)
 
+-- | Parser for 'SmartDate' that representing day of month
+--
+-- >>> let p = parsewith (md <* eof)
+-- >>> p "1/2"
+-- Right ("","1","2")
+-- >>> p "jan-2"
+-- Right ("","1","2")
+-- >>> p "jan 2nd"
+-- Right ("","1","2")
+-- >>> p "jan 1"
+-- Right ("","1","1")
+-- >>> p "1 january"
+-- Right ("","1","1")
 md :: SimpleTextParser SmartDate
-md = do
-  m <- some digitChar
-  failIfInvalidMonth m
-  datesepchar
-  d <- some digitChar
-  failIfInvalidDay d
-  return ("",m,d)
+md = choice'
+        [ do
+            m <- show <$> (monthNum <|> numericMonth)
+            datesepchar
+            d <- some digitChar
+            failIfInvalidDay d
+            return ("",m,d)
+        , do
+            m <- show <$> monthNum
+            some spacenonewline
+            d <- some digitChar <* optional ordinalSuffix
+            failIfInvalidDay d
+            return ("", m, d)
+        , do
+            d <- some digitChar <* optional ordinalSuffix
+            failIfInvalidDay d
+            some spacenonewline
+            m <- show <$> monthNum
+            return ("", m, d)
+        ]
+
+numericMonth :: SimpleTextParser Int
+numericMonth = do
+    m <- read <$> some digitChar
+    failIfInvalidMonth $ show m
+    return m
 
 months         = ["january","february","march","april","may","june",
                   "july","august","september","october","november","december"]
@@ -770,6 +799,12 @@ lastthisnextthing = do
 -- Right (NoInterval,DateSpan 2008/08/01-2008/09/30)
 -- >>> p "aug to oct"
 -- Right (NoInterval,DateSpan 2008/08/01-2008/09/30)
+-- >>> p "from 2nd January"
+-- Right (NoInterval,DateSpan 2008/01/02-)
+-- >>> p "from 2017-jan-02"
+-- Right (NoInterval,DateSpan 2017/01/02-)
+-- >>> p "from 2017/jan"
+-- Right (NoInterval,DateSpan 2017/01/01-)
 -- >>> p "every 3 days in Aug"
 -- Right (Days 3,DateSpan 2008/08)
 -- >>> p "daily from aug"
@@ -853,12 +888,8 @@ reportinginterval = choice' [
                           optOf_ "month"
                           return $ DayOfMonth n,
                        do string "every"
-                          d_o_y <- makePermParser $ DayOfYear <$$> try (many spacenonewline *> monthNum) <||> try (many spacenonewline *> nth)
-                          optOf_ "year"
-                          return d_o_y,
-                       do string "every"
                           many spacenonewline
-                          ("",m,d) <- md
+                          ("", m, d) <- md
                           optOf_ "year"
                           return $ DayOfYear (read m) (read d),
                        do string "every"
@@ -879,7 +910,7 @@ reportinginterval = choice' [
       optOf_ period = optional $ try $ of_ period
       
       nth = do n <- some digitChar
-               choice' $ map string ["st","nd","rd","th"]
+               ordinalSuffix
                return $ read n
 
       -- Parse any of several variants of a basic interval, eg "daily", "every day", "every N days".
@@ -903,6 +934,9 @@ reportinginterval = choice' [
           compact'  = T.pack compact
           singular' = T.pack singular
           plural'   = T.pack $ singular ++ "s"
+
+ordinalSuffix :: SimpleTextParser ()
+ordinalSuffix = () <$ choice (map string ["st","nd","rd","th"])
 
 periodexprdatespan :: Day -> SimpleTextParser DateSpan
 periodexprdatespan rdate = choice $ map try [
