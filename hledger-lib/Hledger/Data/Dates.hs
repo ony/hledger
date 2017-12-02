@@ -647,7 +647,7 @@ Assumes any text in the parse stream has been lowercased.
 smartdate :: SimpleTextParser SmartDate
 smartdate = do
   -- XXX maybe obscures date errors ? see ledgerdate
-  (y,m,d) <- choice' [yyyymmdd, ymd, ym, md, y, d, month, mon, today, yesterday, tomorrow, lastthisnextthing]
+  (y,m,d) <- choice' [yyyymmdd, ymd, ym, md, y, d, smartMonth, today, yesterday, tomorrow, lastthisnextthing]
   return (y,m,d)
 
 -- | Like smartdate, but there must be nothing other than whitespace after the date.
@@ -730,26 +730,14 @@ monthabbrevs   = ["jan","feb","mar","apr","may","jun","jul","aug","sep","oct","n
 weekdays       = ["monday","tuesday","wednesday","thursday","friday","saturday","sunday"]
 weekdayabbrevs = ["mon","tue","wed","thu","fri","sat","sun"]
 
-monthIndex t = maybe 0 (+1) $ t `elemIndex` months
-monIndex t   = maybe 0 (+1) $ t `elemIndex` monthabbrevs
+monthNum :: SimpleTextParser Int
+monthNum = (+1) <$> (indexChoice (map string months) <|> indexChoice (map string monthabbrevs))
 
-month :: SimpleTextParser SmartDate
-month = do
-  m <- choice $ map (try . string) months
-  let i = monthIndex m
-  return ("",show i,"")
+smartMonth :: SimpleTextParser SmartDate
+smartMonth = monthNum >>= \i -> return ("", show i, "")
 
-mon :: SimpleTextParser SmartDate
-mon = do
-  m <- choice $ map (try . string) monthabbrevs
-  let i = monIndex m
-  return ("",show i,"")
-
-weekday :: SimpleTextParser Int
-weekday = do
-  wday <- choice . map string' $ weekdays ++ weekdayabbrevs
-  let i = head . catMaybes $ [wday `elemIndex` weekdays, wday `elemIndex` weekdayabbrevs]
-  return (i+1)
+weekdayNum :: SimpleTextParser Int
+weekdayNum = (+1) <$> (indexChoice (map string weekdays) <|> indexChoice (map string weekdayabbrevs))
 
 today,yesterday,tomorrow :: SimpleTextParser SmartDate
 today     = string "today"     >> return ("","","today")
@@ -855,7 +843,7 @@ reportinginterval = choice' [
                           return $ DayOfWeek n,
                        do string "every"
                           many spacenonewline
-                          n <- weekday
+                          n <- weekdayNum
                           return $ DayOfWeek n,
                        do string "every"
                           many spacenonewline
@@ -865,8 +853,7 @@ reportinginterval = choice' [
                           optOf_ "month"
                           return $ DayOfMonth n,
                        do string "every"
-                          let mnth = choice' [month, mon] >>= \(_,m,_) -> return (read m)
-                          d_o_y <- makePermParser $ DayOfYear <$$> try (many spacenonewline *> mnth) <||> try (many spacenonewline *> nth)
+                          d_o_y <- makePermParser $ DayOfYear <$$> try (many spacenonewline *> monthNum) <||> try (many spacenonewline *> nth)
                           optOf_ "year"
                           return d_o_y,
                        do string "every"
@@ -878,7 +865,7 @@ reportinginterval = choice' [
                           many spacenonewline
                           n <- nth
                           many spacenonewline
-                          wd <- weekday
+                          wd <- weekdayNum
                           optOf_ "month"
                           return $ WeekdayOfMonth n wd
                     ]

@@ -1,6 +1,7 @@
 {-# LANGUAGE CPP, TypeFamilies #-}
 module Hledger.Utils.Parse where
 
+import Control.Applicative (Alternative)
 import Control.Monad.Except
 import Control.Monad.State.Strict (StateT, evalStateT)
 import Data.Char
@@ -32,6 +33,10 @@ type ErroringJournalParser m a = StateT Journal (ParsecT MPErr Text (ExceptT Str
 -- Consumes no input if all choices fail.
 choice' :: [TextParser m a] -> TextParser m a
 choice' = choice . map try
+
+-- | Similar to 'choice' but returns zero-based index of parser
+indexChoice :: (Alternative f) => [f a] -> f Int
+indexChoice xs = choice [i <$ x | (i, x) <- zip [0..] xs]
 
 -- | Backtracking choice, use this when alternatives share a prefix.
 -- Consumes no input if all choices fail.
